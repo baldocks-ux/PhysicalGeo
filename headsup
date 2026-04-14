@@ -3,25 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GeoHeads: Instant Flip</title>
+    <title>GeoHeads: Coasts Blitz</title>
     <style>
         :root { --primary: #1b5e20; --secondary: #01579b; --correct: #2e7d32; --pass: #c62828; --light: #f1f8e9; }
         body { font-family: 'Arial Black', sans-serif; margin: 0; background: var(--light); text-align: center; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .screen { display: none; padding: 20px; flex-grow: 1; flex-direction: column; justify-content: center; }
         .active { display: flex; }
-        #word-display { font-size: 5rem; font-weight: bold; text-transform: uppercase; line-height: 1.1; }
+        #word-display { font-size: 4.5rem; font-weight: bold; text-transform: uppercase; line-height: 1.1; word-wrap: break-word; }
         #timer { font-size: 3rem; position: absolute; top: 10px; right: 20px; font-weight: bold; color: #ffeb3b; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
         .btn { background: var(--primary); color: white; border: none; padding: 25px 50px; font-size: 2rem; border-radius: 15px; cursor: pointer; }
         #game-screen { background: var(--secondary); color: white; transition: background 0.2s; }
         .flash-correct { background-color: var(--correct) !important; }
         .flash-pass { background-color: var(--pass) !important; }
+        .neutral-wait { opacity: 0.5; } /* Subtly indicates waiting for the player to straighten the phone */
     </style>
 </head>
 <body>
 
     <div id="start-screen" class="screen active">
         <h1>🌍 COASTS 30s</h1>
-        <p>Tilt DOWN for Correct<br>Tilt UP to Pass</p>
+        <p>Tilt DOWN: Correct<br>Tilt UP: Pass</p>
         <button class="btn" onclick="requestPermission()">START</button>
     </div>
 
@@ -31,7 +32,7 @@
     </div>
 
     <div id="results-screen" class="screen">
-        <h1>Done!</h1>
+        <h1>Time's Up!</h1>
         <div id="final-score" style="font-size: 4rem; margin: 20px; color: var(--primary);"></div>
         <button class="btn" onclick="location.reload()">PLAY AGAIN</button>
     </div>
@@ -43,15 +44,19 @@
             "Concordant Coast", "Discordant Coast", "Headland", "Bay", "Wave-cut Platform",
             "Cave", "Arch", "Stack", "Stump", "Spit", "Bar", "Tombolo", "Sand Dune",
             "Hard Engineering", "Soft Engineering", "Sea Wall", "Groyne", "Rock Armour",
-            "Gabion", "Beach Nourishment", "Managed Retreat", "Cliff Regrading"
+            "Gabion", "Beach Nourishment", "Managed Retreat", "Cliff Regrading", "Saltation"
         ];
 
-        let score = 0, timeLeft = 30, gameActive = false, canAction = true;
+        let score = 0, timeLeft = 30, gameActive = false;
+        let canAction = true; 
+        let waitingForNeutral = false;
         let currentWordIndex = 0;
 
         function requestPermission() {
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission().then(res => { if(res === 'granted') startGame(); });
+                DeviceOrientationEvent.requestPermission()
+                    .then(res => { if(res === 'granted') startGame(); })
+                    .catch(e => alert("Permission denied. Check settings."));
             } else { startGame(); }
         }
 
@@ -77,20 +82,35 @@
         }
 
         function handleOrientation(event) {
-            if (!gameActive || !canAction) return;
+            if (!gameActive) return;
 
-            const tilt = event.beta; // 90 is vertical (on forehead)
+            const tilt = event.beta; // 90 is vertical/standing position
 
-            if (tilt < 45) { // Tilted Down
-                recordResult(true);
-            } else if (tilt > 135) { // Tilted Up
-                recordResult(false);
+            // 1. Check for Action (Only if we aren't waiting for neutral)
+            if (canAction && !waitingForNeutral) {
+                if (tilt < 45) { // Tilted Down toward floor
+                    recordResult(true);
+                } else if (tilt > 135) { // Tilted Up toward ceiling
+                    recordResult(false);
+                }
+            }
+
+            // 2. Check for Return to Neutral (Unlocks the next action)
+            if (waitingForNeutral) {
+                if (tilt > 70 && tilt < 110) { // Widened neutral zone for reliability
+                    waitingForNeutral = false;
+                    canAction = true;
+                    document.getElementById('word-display').classList.remove('neutral-wait');
+                }
             }
         }
 
         function recordResult(isCorrect) {
-            canAction = false; // Lock sensor immediately
+            canAction = false;
+            waitingForNeutral = true;
+            
             const screen = document.getElementById('game-screen');
+            const display = document.getElementById('word-display');
             
             if (isCorrect) {
                 score++;
@@ -99,21 +119,13 @@
                 screen.classList.add('flash-pass');
             }
 
-            // Wait for visual flash, then prep next word
+            // Short visual delay for the flash
             setTimeout(() => {
                 screen.classList.remove('flash-correct', 'flash-pass');
+                display.classList.add('neutral-wait'); // Dim the word until they straighten up
                 currentWordIndex++;
                 showNextWord();
-                
-                // CRITICAL: Only unlock the sensor once the phone is vertical again (Neutral Zone)
-                const checkNeutral = (e) => {
-                    if (e.beta > 75 && e.beta < 105) {
-                        canAction = true;
-                        window.removeEventListener('deviceorientation', checkNeutral);
-                    }
-                };
-                window.addEventListener('deviceorientation', checkNeutral);
-            }, 600);
+            }, 500);
         }
 
         function endGame() {
